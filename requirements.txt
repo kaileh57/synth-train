@@ -1,0 +1,59 @@
+# Core ML packages
+torch==2.1.0
+transformers==4.35.0
+datasets==2.14.6
+accelerate==0.24.1
+tokenizers==0.14.1
+
+# Experiment tracking
+wandb==0.16.0
+tensorboard==2.15.1
+
+# Data processing
+numpy==1.24.3
+pandas==2.1.3
+scipy==1.11.4
+scikit-learn==1.3.2
+
+# Text analysis
+textstat==0.7.3
+nltk==3.8.1
+rouge-score==0.1.2
+
+# Evaluation
+evaluate==0.4.1
+
+# Visualization
+matplotlib==3.8.1
+seaborn==0.13.0
+
+# Utilities
+tqdm==4.66.1
+pyyaml==6.0.1
+python-dotenv==1.0.0
+
+# Development
+ipython==8.17.2
+jupyter==1.0.0
+notebook==7.0.6
+
+# Optional optimizations
+# ninja==1.11.1  # For faster PyTorch compilation
+# triton==2.1.0  # For optimized kernels
+
+# Additional dependencies that might be needed
+huggingface-hub>=0.19.0
+filelock
+requests
+urllib3
+certifi
+charset-normalizer
+idna
+typing-extensions
+psutil
+py-cpuinfo
+
+# For advanced features
+einops  # For tensor operations
+bitsandbytes  # For 8-bit optimization (optional)
+peft  # For parameter-efficient fine-tuning (optional) 
