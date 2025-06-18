@@ -21,9 +21,14 @@ from transformers import (
     Trainer,
     TrainingArguments,
     DataCollatorForLanguageModeling,
-    set_seed
+    set_seed,
+    trainer_utils
 )
 import wandb
+
+# Add project root to path for imports
+project_root = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(project_root))
 
 # Add parent directory to path for imports
 parent_dir = Path(__file__).parent.parent
@@ -288,6 +293,19 @@ class QualityExperimentTrainer:
         logger.info("Starting training...")
         train_result = trainer.train(resume_from_checkpoint=resume_from_checkpoint)
         
+        # Log budget
+        try:
+            from budget import BudgetTracker
+            budget_tracker = BudgetTracker()
+            train_hours = train_result.metrics.get("train_runtime", 0) / 3600
+            if train_hours > 0:
+                budget_tracker.record_expense(train_hours, f"Experiment 2: {self.experiment_name}")
+                logger.info(budget_tracker.get_summary())
+        except ImportError:
+            logger.warning("budget.py not found in project root. Skipping budget tracking.")
+        except Exception as e:
+            logger.error(f"Failed to record budget: {e}")
+        
         # Save model
         logger.info("Saving model...")
         trainer.save_model()
@@ -369,12 +387,22 @@ def run_all_experiments(
         logger.info(f"Starting experiment: {exp_name}")
         logger.info(f"{'='*80}\n")
         
-        # Check if already exists
         exp_output = Path(output_dir) / exp_name
+
+        # Check for existing results
         if skip_existing and (exp_output / "train_results.json").exists():
             logger.info(f"Skipping {exp_name} - already exists")
+            results[exp_name] = {"status": "skipped"}
             continue
         
+        # Auto-resume from checkpoint
+        resume_from = None
+        if exp_output.exists():
+            last_checkpoint = trainer_utils.get_last_checkpoint(str(exp_output))
+            if last_checkpoint:
+                logger.info(f"Automatically resuming {exp_name} from {last_checkpoint}")
+                resume_from = last_checkpoint
+
         # Estimate time
         config = get_config_by_name(exp_name)
         time_est = estimate_training_time(config)
@@ -388,7 +416,7 @@ def run_all_experiments(
                 use_wandb=use_wandb
             )
             
-            model, train_result = trainer.train()
+            model, train_result = trainer.train(resume_from_checkpoint=resume_from)
             results[exp_name] = {
                 "status": "completed",
                 "metrics": train_result.metrics
@@ -451,7 +479,17 @@ def main():
             use_wandb=not args.no_wandb
         )
         
-        model, train_result = trainer.train(resume_from_checkpoint=args.resume_from)
+        # Add automatic checkpoint resumption
+        resume_from = args.resume_from
+        if not resume_from:
+            output_dir = Path(args.output_dir) / args.experiment
+            if output_dir.exists():
+                last_checkpoint = trainer_utils.get_last_checkpoint(str(output_dir))
+                if last_checkpoint:
+                    logger.info(f"No explicit checkpoint path provided, resuming from {last_checkpoint}")
+                    resume_from = last_checkpoint
+
+        model, train_result = trainer.train(resume_from_checkpoint=resume_from)
         
         print(f"\nTraining complete for {args.experiment}")
         print(f"Results saved to: {trainer.output_dir}")

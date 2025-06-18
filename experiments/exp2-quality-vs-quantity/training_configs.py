@@ -268,6 +268,10 @@ def estimate_training_time(config: ExperimentConfig, gpu_type: str = "RTX_4090")
         "A100": {
             "500M": 5000,
             "1B": 2500
+        },
+        "A6000": {
+            "500M": 4500,
+            "1B": 2200
         }
     }
     

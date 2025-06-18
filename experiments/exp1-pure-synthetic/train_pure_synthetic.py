@@ -23,10 +23,15 @@ from transformers import (
     TrainingArguments,
     DataCollatorForLanguageModeling,
     get_linear_schedule_with_warmup,
-    set_seed
+    set_seed,
+    trainer_utils
 )
 from accelerate import Accelerator
 import wandb
+
+# Add project root to path to allow importing budget
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+sys.path.insert(0, project_root)
 
 # Import local modules
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -136,6 +141,20 @@ def create_model(config: ExperimentConfig):
     # Create model
     model = GPT2LMHeadModel(model_config)
     
+    # Handle asymmetric multi-GPU setup
+    if torch.cuda.device_count() > 1:
+        # This device map is optimized for an A6000 + A4500 setup with a 24-layer model.
+        # It places more layers on the more powerful GPU (assumed to be device 0).
+        if model_config.n_layer == 24:
+            logger.info("Applying asymmetric device map for 2-GPU setup.")
+            device_map = {
+                0: list(range(12)),  # First 12 layers on GPU 0 (e.g., A6000)
+                1: list(range(12, 24)), # Last 12 layers on GPU 1 (e.g., A4500)
+            }
+            model.parallelize(device_map)
+        else:
+            logger.info("Using default DataParallel for multi-GPU setup.")
+
     # Count parameters
     total_params = sum(p.numel() for p in model.parameters())
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -158,7 +177,7 @@ def get_training_args(config: ExperimentConfig, train_config: dict):
         output_dir=str(config.output_dir),
         num_train_epochs=config.num_train_epochs,
         per_device_train_batch_size=train_config["per_device_train_batch_size"],
-        per_device_eval_batch_size=train_config["per_device_train_batch_size"] * 2,
+        per_device_eval_batch_size=min(train_config["per_device_train_batch_size"], 4),
         gradient_accumulation_steps=train_config["gradient_accumulation_steps"],
         eval_accumulation_steps=4,
         learning_rate=train_config["learning_rate"],
@@ -336,6 +355,13 @@ def main():
     
     # Create experiment config
     config = ExperimentConfig(args)
+
+    # Add automatic checkpoint resumption
+    if not config.resume_from_checkpoint:
+        last_checkpoint = trainer_utils.get_last_checkpoint(str(config.output_dir))
+        if last_checkpoint is not None:
+            logger.info(f"No explicit checkpoint path provided, but found last checkpoint at {last_checkpoint}. Resuming.")
+            config.resume_from_checkpoint = last_checkpoint
     
     # Setup wandb if requested
     setup_wandb(config)
@@ -361,6 +387,19 @@ def main():
         config
     )
     
+    # Log budget expense
+    try:
+        from budget import BudgetTracker
+        budget_tracker = BudgetTracker()
+        train_hours = train_result.metrics.get("train_runtime", 0) / 3600
+        if train_hours > 0:
+            budget_tracker.record_expense(train_hours, f"Experiment 1: {config.run_name}")
+            logger.info(budget_tracker.get_summary())
+    except ImportError:
+        logger.warning("budget.py not found in project root. Skipping budget tracking.")
+    except Exception as e:
+        logger.error(f"Failed to record budget: {e}")
+
     # Run final evaluation
     final_results = run_final_evaluation(
         trainer.model,

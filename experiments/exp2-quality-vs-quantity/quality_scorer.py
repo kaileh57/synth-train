@@ -7,6 +7,8 @@ Scores instruction-response pairs on multiple dimensions without using APIs
 import re
 import json
 import logging
+import os
+import pickle
 from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass
 import numpy as np
@@ -52,16 +54,47 @@ class QualityScorer:
         self,
         tokenizer_name: str = "gpt2",
         dimensions: Optional[QualityDimensions] = None,
-        cache_scores: bool = True
+        cache_scores: bool = True,
+        cache_path: str = "quality_cache.pkl"
     ):
         self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
         self.dimensions = dimensions or QualityDimensions()
         self.cache_scores = cache_scores
-        self.score_cache = {}
+        self.cache_path = cache_path
+        self.score_cache = self._load_cache()
         
         # Load instruction patterns for clarity scoring
         self.instruction_patterns = self._load_instruction_patterns()
         self.stop_words = set(stopwords.words('english'))
+    
+    def __del__(self):
+        """Save cache upon object destruction."""
+        self.save_cache()
+
+    def _load_cache(self) -> Dict:
+        """Load score cache from disk if it exists."""
+        if not self.cache_scores or not os.path.exists(self.cache_path):
+            return {}
+        
+        logger.info(f"Loading score cache from {self.cache_path}")
+        try:
+            with open(self.cache_path, "rb") as f:
+                return pickle.load(f)
+        except (pickle.UnpicklingError, EOFError) as e:
+            logger.warning(f"Could not load cache file: {e}. Starting with an empty cache.")
+            return {}
+
+    def save_cache(self):
+        """Save the current score cache to disk."""
+        if not self.cache_scores or not self.score_cache:
+            return
+            
+        logger.info(f"Saving score cache to {self.cache_path} with {len(self.score_cache)} items.")
+        try:
+            with open(self.cache_path, "wb") as f:
+                pickle.dump(self.score_cache, f)
+        except Exception as e:
+            logger.error(f"Failed to save quality score cache: {e}")
     
     def _load_instruction_patterns(self) -> List[str]:
         """Common patterns for clear instructions"""
@@ -112,7 +145,12 @@ class QualityScorer:
         
         # Cache result
         if self.cache_scores:
+            # Check if cache has grown enough to save
+            should_save = cache_key not in self.score_cache
             self.score_cache[cache_key] = (total_score, scores)
+            # Periodically save to avoid data loss on interruption
+            if should_save and len(self.score_cache) % 500 == 0:
+                self.save_cache()
         
         return total_score, scores
     

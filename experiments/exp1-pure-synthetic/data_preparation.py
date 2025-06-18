@@ -78,8 +78,9 @@ class OpenHermesProcessor:
         tokenized = self.tokenizer(
             texts,
             truncation=True,
-            padding="max_length",
+            padding="longest",
             max_length=self.config.max_length,
+            pad_to_multiple_of=8,
             return_tensors="pt"
         )
         

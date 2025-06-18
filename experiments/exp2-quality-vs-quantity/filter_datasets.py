@@ -11,6 +11,7 @@ import argparse
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 import logging
+from itertools import islice
 
 import numpy as np
 import pandas as pd
@@ -57,45 +58,46 @@ class DatasetFilter:
             with open(cache_file, "rb") as f:
                 return pickle.load(f)
         
-        logger.info(f"Loading dataset {dataset_name}")
-        dataset = load_dataset(dataset_name, split="train")
+        logger.info(f"Loading dataset {dataset_name} in streaming mode")
+        dataset = load_dataset(dataset_name, split="train", streaming=True)
         
         if max_samples:
-            dataset = dataset.select(range(min(max_samples, len(dataset))))
+            logger.info(f"Limiting to {max_samples} samples")
+            dataset = dataset.take(max_samples)
         
-        logger.info(f"Scoring {len(dataset)} samples...")
+        logger.info("Scoring samples from streamed dataset...")
         
         scored_data = []
+        dataset_iterator = iter(dataset)
         
-        # Process in batches
-        for i in tqdm(range(0, len(dataset), batch_size), desc="Scoring batches"):
-            batch_end = min(i + batch_size, len(dataset))
-            batch = dataset[i:batch_end]
-            
-            # Convert batch to list of dicts
-            batch_samples = []
-            for j in range(batch_end - i):
-                sample = {k: v[j] if isinstance(v, list) else v for k, v in batch.items()}
-                batch_samples.append(sample)
-            
-            # Score batch
-            batch_scores = self.scorer.score_batch(batch_samples, show_progress=False)
-            
-            # Combine samples with scores
-            for j, (score, components) in enumerate(batch_scores):
-                scored_data.append({
-                    'idx': i + j,
-                    'sample': batch_samples[j],
-                    'score': score,
-                    'components': components
-                })
-            
-            # Save checkpoint every 10k samples
-            if (i + batch_size) % 10000 == 0:
-                checkpoint_file = self.cache_dir / f"{dataset_name.replace('/', '_')}_scores_checkpoint_{i}.pkl"
-                with open(checkpoint_file, "wb") as f:
-                    pickle.dump(scored_data, f)
-        
+        with tqdm(desc="Scoring batches") as pbar:
+            while True:
+                batch_samples = list(islice(dataset_iterator, batch_size))
+                if not batch_samples:
+                    break
+                
+                # Score batch
+                batch_scores = self.scorer.score_batch(batch_samples, show_progress=False)
+                
+                # Combine samples with scores
+                for j, (score, components) in enumerate(batch_scores):
+                    scored_data.append({
+                        'idx': len(scored_data),
+                        'sample': batch_samples[j],
+                        'score': score,
+                        'components': components
+                    })
+
+                pbar.update(len(batch_samples))
+                
+                # Save checkpoint every 10k samples
+                num_scored = len(scored_data)
+                if num_scored > 0 and (num_scored // 10000) > ((num_scored - len(batch_samples)) // 10000):
+                    checkpoint_file = self.cache_dir / f"{dataset_name.replace('/', '_')}_scores_checkpoint_{num_scored}.pkl"
+                    logger.info(f"Saving scoring checkpoint to {checkpoint_file}")
+                    with open(checkpoint_file, "wb") as f:
+                        pickle.dump(scored_data, f)
+
         # Save final scores
         with open(cache_file, "wb") as f:
             pickle.dump(scored_data, f)

@@ -231,14 +231,14 @@ def get_training_config(model_size: str = "500M") -> dict:
         })
     elif model_size == "1B":
         base_config.update({
-            "per_device_train_batch_size": 2,
-            "gradient_accumulation_steps": 16,
+            "per_device_train_batch_size": 8,
+            "gradient_accumulation_steps": 4,
             "learning_rate": 1.5e-4,  # Slightly lower for larger model
         })
     elif model_size == "1.5B":
         base_config.update({
-            "per_device_train_batch_size": 1,
-            "gradient_accumulation_steps": 32,
+            "per_device_train_batch_size": 4,
+            "gradient_accumulation_steps": 8,
             "learning_rate": 1e-4,
         })
     
