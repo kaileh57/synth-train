@@ -30,6 +30,18 @@ import wandb
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
+# Import budget tracking safely
+try:
+    from utils.imports import safe_import_budget
+    BudgetTracker = safe_import_budget()
+except ImportError:
+    # Fallback if utils not available
+    class BudgetTracker:
+        def record_expense(self, hours, description):
+            print(f"Budget: {description} - {hours} hours")
+        def get_summary(self):
+            return "Budget tracking unavailable"
+
 # Add parent directory to path for imports
 parent_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(parent_dir))
@@ -294,17 +306,11 @@ class QualityExperimentTrainer:
         train_result = trainer.train(resume_from_checkpoint=resume_from_checkpoint)
         
         # Log budget
-        try:
-            from budget import BudgetTracker
-            budget_tracker = BudgetTracker()
-            train_hours = train_result.metrics.get("train_runtime", 0) / 3600
-            if train_hours > 0:
-                budget_tracker.record_expense(train_hours, f"Experiment 2: {self.experiment_name}")
-                logger.info(budget_tracker.get_summary())
-        except ImportError:
-            logger.warning("budget.py not found in project root. Skipping budget tracking.")
-        except Exception as e:
-            logger.error(f"Failed to record budget: {e}")
+        budget_tracker = BudgetTracker()
+        train_hours = train_result.metrics.get("train_runtime", 0) / 3600
+        if train_hours > 0:
+            budget_tracker.record_expense(train_hours, f"Experiment 2: {self.experiment_name}")
+            logger.info(budget_tracker.get_summary())
         
         # Save model
         logger.info("Saving model...")

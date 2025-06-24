@@ -191,6 +191,15 @@ print_status "Installing evaluation libraries..."
 $PYTHON_CMD -m pip install sacrebleu==2.4.0
 $PYTHON_CMD -m pip install evaluate==0.4.1
 
+# Install missing dependencies for evaluation framework
+print_status "Installing additional evaluation dependencies..."
+$PYTHON_CMD -m pip install packaging==23.2
+$PYTHON_CMD -m pip install py-cpuinfo==9.0.0
+
+# Install missing dependencies for mixing experiments  
+print_status "Installing dataset mixing dependencies..."
+$PYTHON_CMD -m pip install jaxtyping==0.2.24
+
 # Install utility libraries
 print_status "Installing utility libraries..."
 $PYTHON_CMD -m pip install python-dotenv==1.0.0

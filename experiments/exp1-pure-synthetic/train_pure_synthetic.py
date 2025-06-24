@@ -29,9 +29,18 @@ from transformers import (
 from accelerate import Accelerator
 import wandb
 
-# Add project root to path to allow importing budget
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-sys.path.insert(0, project_root)
+# Import budget tracking safely
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
+try:
+    from utils.imports import safe_import_budget
+    BudgetTracker = safe_import_budget()
+except ImportError:
+    # Fallback if utils not available
+    class BudgetTracker:
+        def record_expense(self, hours, description):
+            print(f"Budget: {description} - {hours} hours")
+        def get_summary(self):
+            return "Budget tracking unavailable"
 
 # Import local modules
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -143,17 +152,17 @@ def create_model(config: ExperimentConfig):
     
     # Handle asymmetric multi-GPU setup
     if torch.cuda.device_count() > 1:
-        # This device map is optimized for an A6000 + A4500 setup with a 24-layer model.
-        # It places more layers on the more powerful GPU (assumed to be device 0).
-        if model_config.n_layer == 24:
-            logger.info("Applying asymmetric device map for 2-GPU setup.")
-            device_map = {
-                0: list(range(12)),  # First 12 layers on GPU 0 (e.g., A6000)
-                1: list(range(12, 24)), # Last 12 layers on GPU 1 (e.g., A4500)
-            }
-            model.parallelize(device_map)
-        else:
-            logger.info("Using default DataParallel for multi-GPU setup.")
+        logger.info(f"Detected {torch.cuda.device_count()} GPUs")
+        for i in range(torch.cuda.device_count()):
+            props = torch.cuda.get_device_properties(i)
+            logger.info(f"  GPU {i}: {props.name} ({props.total_memory/1e9:.1f}GB)")
+        
+        # Use DataParallel for model parallelism
+        # This works better than manual device mapping for training
+        model = torch.nn.DataParallel(model)
+        logger.info("Using DataParallel for multi-GPU training")
+    else:
+        logger.info("Using single GPU training")
 
     # Count parameters
     total_params = sum(p.numel() for p in model.parameters())
@@ -388,15 +397,11 @@ def main():
     )
     
     # Log budget expense
-    try:
-        from budget import BudgetTracker
-        budget_tracker = BudgetTracker()
-        train_hours = train_result.metrics.get("train_runtime", 0) / 3600
-        if train_hours > 0:
-            budget_tracker.record_expense(train_hours, f"Experiment 1: {config.run_name}")
-            logger.info(budget_tracker.get_summary())
-    except ImportError:
-        logger.warning("budget.py not found in project root. Skipping budget tracking.")
+    budget_tracker = BudgetTracker()
+    train_hours = train_result.metrics.get("train_runtime", 0) / 3600
+    if train_hours > 0:
+        budget_tracker.record_expense(train_hours, f"Experiment 1: {config.run_name}")
+        logger.info(budget_tracker.get_summary())
     except Exception as e:
         logger.error(f"Failed to record budget: {e}")
 
