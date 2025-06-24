@@ -8,9 +8,21 @@ import sys
 import argparse
 from pathlib import Path
 
-# Add project root to path
+# Add project root to path for imports
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
+
+# Import budget tracking safely
+try:
+    from utils.imports import safe_import_budget
+    BudgetTracker = safe_import_budget()
+except ImportError:
+    # Fallback if utils not available
+    class BudgetTracker:
+        def record_expense(self, hours, description):
+            print(f"Budget: {description} - {hours} hours")
+        def get_summary(self):
+            return "Budget tracking unavailable"
 
 from experiments.exp1_pure_synthetic.model_configs import create_model_config
 from experiments.exp1_pure_synthetic.train_pure_synthetic import main as train_main
